@@ -6,22 +6,21 @@ startDate = input.time(timestamp('2022-01-01'), title = 'Start Date', tooltip = 
 var float priceCompareMargin = 0.02
 
 type AllTimeLowState
-    int atlBar
-    float atlPrice
-    label atlLabelIndex
-    int prevP3DatlBar
-    float prevP3DatlPrice
-    label prevP3DLabelIndex
-    int prevP2DatlBar
-    float prevP2DatlPrice
-    label prevP2DLabelIndex
-    int prevPrevP3DatlBar
-    float prevPrevP3DatlPrice
-    label prevPrevP3DLabelIndex
+    int atl_bar
+    float atl_price
+    label atl_label_index
+    int prev_p3d_atl_bar
+    float prev_p3d_atl_price
+    label prev_p3d_label_index
+    int prev_p2d_atl_bar
+    float prev_p2d_atl_price
+    label prev_p2d_label_index
+    int prev_prev_p3d_atl_bar
+    float prev_prev_p3d_atl_price
+    label prev_prev_p3d_label_index
 
-var atlState = AllTimeLowState.new(na, na, na)
+var atlState = AllTimeLowState.new()
 
-//label.new(x = 3153, y = 101.81, text = 'TEST', style = label.style_label_up, color = color.purple, textcolor = color.white)
 
 printBarAndDate() =>
     log.info("Current bar " + str.tostring(bar_index) + " and Date " + str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone))
@@ -30,39 +29,32 @@ checkIfWithinRange() =>
     time >= startDate
 
 processNewAllTimeLow() =>
-    if na(atlState.atlPrice) or low < atlState.atlPrice
-        atlState.atlPrice := low
-        atlState.atlBar := bar_index
-        log.info("Setting All Time Low Price to: " + str.tostring(atlState.atlBar))
+    if na(atlState.atl_price) or low < atlState.atl_price
+        atlState.atl_price := low
+        atlState.atl_bar := bar_index
+        log.info("Setting All Time Low Price to: " + str.tostring(atlState.atl_bar))
         // printBarAndDate()
         // TODO: At this point we need to reset all states and start from here
-        if not na(atlState.atlLabelIndex)
-            label.delete(atlState.atlLabelIndex)
-            atlState.atlLabelIndex := na
-        atlState.atlLabelIndex := label.new(x = atlState.atlBar, y = atlState.atlPrice, text = 'ATL', style = label.style_label_up, color = color.purple, textcolor = color.white)
+        if not na(atlState.atl_label_index)
+            label.delete(atlState.atl_label_index)
+            atlState.atl_label_index := na
+        atlState.atl_label_index := label.new(x = atlState.atl_bar, y = atlState.atl_price, text = 'ATL', style = label.style_label_up, color = color.purple, textcolor = color.white)
 
         // Find previous P3D, P2D
-
-        // Variable to store the point where at least two lower candles are found (prev_p2d)
-        var float prev_p2d = na
-
-        // Variable to store the point before prev_p2d where a higher candle is found (prev_prev_p3d)
-        var float prev_prev_p3d = na
     
         // Step 1: Iterate backwards from the current bar
         if bar_index >= 1
-            atlState.prevP3DatlPrice := high[1] // High of the bar immediately preceding the current bar
-            atlState.prevP3DatlBar := bar_index - 1
-
+            atlState.prev_p3d_atl_price := high[1] // High of the bar immediately preceding the current bar
+            atlState.prev_p3d_atl_bar := bar_index - 1
             
             int lower_candles_count = 0
             int prev_p2d_bar_index = na
             bool prev_p3d_found = false
             for i = 2 to bar_index 
                 // Find the first high point going back from ATL
-                if high[i] > atlState.prevP3DatlPrice and not prev_p3d_found
-                    atlState.prevP3DatlPrice := high[i]
-                    atlState.prevP3DatlBar := bar_index - i
+                if (high[i] + priceCompareMargin * high[i]) > atlState.prev_p3d_atl_price and not prev_p3d_found
+                    atlState.prev_p3d_atl_price := high[i]
+                    atlState.prev_p3d_atl_bar := bar_index - i
                     continue
                 else
                     prev_p3d_found := true
@@ -70,49 +62,43 @@ processNewAllTimeLow() =>
                 // Step 2: From that prev_p3d, go backwards again
                 // Search for at least two candles that are lower than prev_p3d.
                 // Mark that spot as prev_p2d.
-                if high[i] < atlState.prevP3DatlPrice
+                if high[i] < atlState.prev_p3d_atl_price
                     lower_candles_count := lower_candles_count + 1
                     if lower_candles_count >= 2 and na(prev_p2d_bar_index)
                         prev_p2d_bar_index := bar_index - i // Store the index of this bar
-                        prev_p2d := high[i] // Store the high of this bar
-                        atlState.prevP2DatlBar := prev_p2d_bar_index
-                        atlState.prevP2DatlPrice := prev_p2d
+                        atlState.prev_p2d_atl_price := low[i] // Store the high of this bar
+                        atlState.prev_p2d_atl_bar := prev_p2d_bar_index
                 else
                     // Reset count if a candle is not lower than prev_p3d before finding two
                     if lower_candles_count < 2
                         lower_candles_count := 0
                     else
-                        // If we already found prev_p2d, and this candle is not lower,
-                        // we might be looking for prev_prev_p3d
                         break // Stop searching for prev_p2d if condition is met or broken
 
-            // Step 3: From prev_p2d, iterate backwards again
-            log.info("Search prev prev")
+            // Step 3: From prev_p2d, iterate backwards again. Look for next highest P3D
             if not na(prev_p2d_bar_index)
                 int j = (bar_index - prev_p2d_bar_index) + 1
-                atlState.prevPrevP3DatlPrice := high[j]
-                atlState.prevPrevP3DatlBar := bar_index - j
+                atlState.prev_prev_p3d_atl_price := high[j]
+                atlState.prev_prev_p3d_atl_bar := bar_index - j
                 bool prev_prev_p3d_found = false
-                log.info(str.tostring(j))
-                for i = j + 1 to bar_index // Start one bar after prev_p2d's index
-                    log.info(str.tostring(high[i]))
-                    log.info(str.tostring(atlState.prevPrevP3DatlPrice))
-                    if (high[i] + priceCompareMargin * high[i]) > atlState.prevPrevP3DatlPrice and not prev_prev_p3d_found
-                        atlState.prevPrevP3DatlPrice := high[i]
-                        atlState.prevPrevP3DatlBar := bar_index - i
+                for i = j + 1 to bar_index
+                    if (high[i] + priceCompareMargin * high[i]) > atlState.prev_prev_p3d_atl_price and not prev_prev_p3d_found
+                        atlState.prev_prev_p3d_atl_price := high[i]
+                        atlState.prev_prev_p3d_atl_bar := bar_index - i
                         continue
                     else 
                         prev_prev_p3d_found := true
                         break
 
             // Plotting for visualization (optional)
-            label.delete(atlState.prevP3DLabelIndex)
-            label.delete(atlState.prevP2DLabelIndex)
-            label.delete(atlState.prevPrevP3DLabelIndex)
+            label.delete(atlState.prev_p3d_label_index)
+            label.delete(atlState.prev_p2d_label_index)
+            label.delete(atlState.prev_prev_p3d_label_index)
 
-            atlState.prevP3DLabelIndex := label.new(x = atlState.prevP3DatlBar, y = atlState.prevP3DatlPrice, text = 'Prev P3D', style = label.style_label_up, color = color.red, textcolor = color.white)
-            atlState.prevP2DLabelIndex := label.new(x = atlState.prevP2DatlBar, y = atlState.prevP2DatlPrice, text = 'Prev P2D', style = label.style_label_up, color = color.yellow, textcolor = color.white)
-            atlState.prevPrevP3DLabelIndex := label.new(x = atlState.prevPrevP3DatlBar, y = atlState.prevPrevP3DatlPrice, text = 'Prev P3D', style = label.style_label_down, color = color.green, textcolor = color.white)
+            atlState.prev_p3d_label_index := label.new(x = atlState.prev_p3d_atl_bar, y = atlState.prev_p3d_atl_price, text = 'Prev P3D', style = label.style_label_down, color = color.red, textcolor = color.white)
+            atlState.prev_p2d_label_index := label.new(x = atlState.prev_p2d_atl_bar, y = atlState.prev_p2d_atl_price, text = 'Prev P2D', style = label.style_label_up, color = color.yellow, textcolor = color.white)
+            atlState.prev_prev_p3d_label_index := label.new(x = atlState.prev_prev_p3d_atl_bar, y = atlState.prev_prev_p3d_atl_price, text = 'Prev P3D', style = label.style_label_down, color = color.green, textcolor = color.white)
+
 
 
 if checkIfWithinRange()
