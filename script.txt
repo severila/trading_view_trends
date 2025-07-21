@@ -1,7 +1,7 @@
 //@version=6
 indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500)
 
-startDate = input.time(timestamp('2022-11-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
+startDate = input.time(timestamp('2022-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
 
 var float priceCompareMargin = 0.02
 var int NUM_CORRECTION_CANDLES = 3
@@ -225,12 +225,12 @@ processNewAllTimeLow() =>
 
 
 processDownTrend() =>
-    // printBarAndDate("[Down Trend] Process current bar at zone " + str.tostring(currentState.zone))
     lastPivot = pivotHistory.get(-1)
     if lastPivot.pivotType == PivotPointType.P2D
+        printBarAndDate("[Down Trend] Process current bar at zone " + str.tostring(currentState.zone))
         if low < lastPivot.pivotLow
-            currentState.numCorrectionCandles := 0
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2D, true)
+            
         else if high > lastPivot.pivotHigh
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
@@ -244,7 +244,12 @@ processDownTrend() =>
 
     if lastPivot.pivotType == PivotPointType.P3D
         if high > lastPivot.pivotHigh
-            createLabelAndHistoryAtCurrentBar(PivotPointType.P3D, true)
+            PivotPoint lastP3D = pivotHistory.get(-3)
+            if high > lastP3D.pivotHigh
+                currentState.zone := TrendZone.TrendlessZone
+                createLabelAndHistoryAtCurrentBar(PivotPointType.TLU, true)
+            else
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P3D, true)
         else if low < lastPivot.pivotLow
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
