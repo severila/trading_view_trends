@@ -1,50 +1,158 @@
 //@version=6
 indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500)
 
-startDate = input.time(timestamp('2022-01-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
+startDate = input.time(timestamp('2022-11-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
 
 var float priceCompareMargin = 0.02
+var int NUM_CORRECTION_CANDLES = 3
 
 type AllTimeLowState
     int atl_bar
-    float atl_price
+    float atl_price_high
+    float atl_price_low
     label atl_label_index
     int prev_p3d_atl_bar
-    float prev_p3d_atl_price
+    float prev_p3d_atl_price_high
+    float prev_p3d_atl_price_low
     label prev_p3d_label_index
     int prev_p2d_atl_bar
-    float prev_p2d_atl_price
+    float prev_p2d_atl_price_high
+    float prev_p2d_atl_price_low
     label prev_p2d_label_index
     int prev_prev_p3d_atl_bar
-    float prev_prev_p3d_atl_price
+    float prev_prev_p3d_atl_price_high
+    float prev_prev_p3d_atl_price_low
     label prev_prev_p3d_label_index
 
 var atlState = AllTimeLowState.new()
 
+enum TrendZone
+    DownZone
+    UpZone
+    TrendlessZone
 
-printBarAndDate() =>
-    log.info("Current bar " + str.tostring(bar_index) + " and Date " + str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone))
+enum PivotPointType
+    ATL
+    P3D
+    P2D
+    P2H
+    P3H
+    TLD
+    TLU
+
+type PivotPoint
+    PivotPointType pivotType
+    float pivotHigh
+    float pivotLow
+    int barIndex
+    label pivotLabel
+
+var array<PivotPoint> pivotHistory = array.new<PivotPoint>(0)
+
+type CurrentState
+    TrendZone zone
+    PivotPoint pivotPoint
+    int numCorrectionCandles = 0
+
+var currentState = CurrentState.new(zone=TrendZone.TrendlessZone, pivotPoint = na)
+
+printBarAndDate(string message = na) =>
+    string barInfo = "[Bar: " + str.tostring(bar_index) + "][Time: " + str.format_time(time, "yyyy-MM-dd", syminfo.timezone) + "]"
+    if not na(message)
+        log.info(message + barInfo)
+    else
+        log.info("Current bar " + barInfo)
+
+getPivotTypeColor(PivotPointType pivotType) =>
+    switch pivotType
+        PivotPointType.ATL => color.purple
+        PivotPointType.P2D => color.red
+        PivotPointType.P3D => color.orange
+        PivotPointType.P2H => color.green
+        PivotPointType.P3H => color.navy
+        PivotPointType.TLD => color.black
+        PivotPointType.TLU => color.yellow
+
+getPivotTypeLabelStyle(PivotPointType pivotType) =>
+    switch pivotType
+        PivotPointType.ATL => label.style_label_up
+        PivotPointType.P2D => label.style_label_up
+        PivotPointType.P3D => label.style_label_down
+        PivotPointType.P2H => label.style_label_down
+        PivotPointType.P3H => label.style_label_up
+        PivotPointType.TLD => label.style_label_up
+        PivotPointType.TLU => label.style_label_down
+    
+getPivotTypeLabelY(PivotPointType pivotType) =>
+    switch pivotType
+        PivotPointType.ATL => low
+        PivotPointType.P2D => low
+        PivotPointType.P3D => high
+        PivotPointType.P2H => high
+        PivotPointType.P3H => low
+        PivotPointType.TLD => low
+        PivotPointType.TLU => high
+
+createLabelAndHistoryAtCurrentBar(PivotPointType pivotType, bool replaceLast = false) =>
+    if replaceLast
+        label.delete(pivotHistory.get(-1).pivotLabel)
+        pivotHistory.pop()
+    label labelIndex = label.new(x = bar_index, y = getPivotTypeLabelY(pivotType), text = str.tostring(pivotType), style = getPivotTypeLabelStyle(pivotType), color = getPivotTypeColor(pivotType), textcolor = color.white)
+    pivotHistory.push(PivotPoint.new(barIndex = bar_index, pivotHigh = high, pivotLow = low, pivotType = pivotType, pivotLabel = labelIndex))
 
 checkIfWithinRange() =>
     time >= startDate
 
+initStatesAfterAllTimeLow() =>
+    printBarAndDate("Init states after All Time Low")
+    currentState.zone := TrendZone.DownZone
+    array.clear(pivotHistory)
+    prev_prev_p3d = PivotPoint.new(pivotType=PivotPointType.P3D,
+         pivotHigh=atlState.prev_prev_p3d_atl_price_high,
+         pivotLow=atlState.prev_prev_p3d_atl_price_low,
+         barIndex=atlState.prev_prev_p3d_atl_bar,
+         pivotLabel=atlState.prev_prev_p3d_label_index)
+    pivotHistory.push(prev_prev_p3d)
+    prev_p2d = PivotPoint.new(pivotType=PivotPointType.P2D,
+         pivotHigh=atlState.prev_p2d_atl_price_high,
+         pivotLow=atlState.prev_p2d_atl_price_low,
+         barIndex=atlState.prev_p2d_atl_bar,
+         pivotLabel=atlState.prev_p2d_label_index)
+    pivotHistory.push(prev_p2d)
+    log.info(str.tostring(atlState.prev_p3d_atl_price_high))
+    prev_p3d_obj = PivotPoint.new(pivotType=PivotPointType.P3D,
+         pivotHigh=atlState.prev_p3d_atl_price_high,
+         pivotLow=atlState.prev_p3d_atl_price_low,
+         barIndex=atlState.prev_p3d_atl_bar,
+         pivotLabel=atlState.prev_p3d_label_index)
+    pivotHistory.push(prev_p3d_obj)
+    // We treat ATL as P2D in history
+    atl = PivotPoint.new(pivotType=PivotPointType.P2D,
+         pivotHigh=atlState.atl_price_high,
+         pivotLow=atlState.atl_price_low,
+         barIndex=atlState.atl_bar,
+         pivotLabel=atlState.atl_label_index)
+    pivotHistory.push(atl)
+
 processNewAllTimeLow() =>
-    if na(atlState.atl_price) or low < atlState.atl_price
-        atlState.atl_price := low
+    if na(atlState.atl_price_low) or low < atlState.atl_price_low
+        atlState.atl_price_low := low
+        atlState.atl_price_high := high
         atlState.atl_bar := bar_index
-        log.info("Setting All Time Low Price to: " + str.tostring(atlState.atl_bar))
-        // printBarAndDate()
-        // TODO: At this point we need to reset all states and start from here
+        log.info("Setting All Time Low Price to: " + str.tostring(atlState.atl_price_low))
+        
         if not na(atlState.atl_label_index)
             label.delete(atlState.atl_label_index)
             atlState.atl_label_index := na
-        atlState.atl_label_index := label.new(x = atlState.atl_bar, y = atlState.atl_price, text = 'ATL', style = label.style_label_up, color = color.purple, textcolor = color.white)
+        atlState.atl_label_index := label.new(x = atlState.atl_bar, y = atlState.atl_price_low, text = 'ATL', style = label.style_label_up, color = getPivotTypeColor(PivotPointType.ATL), textcolor = color.white)
 
         // Find previous P3D, P2D
     
         // Step 1: Iterate backwards from the current bar
         if bar_index >= 1
-            atlState.prev_p3d_atl_price := high[1] // High of the bar immediately preceding the current bar
+            printBarAndDate("Setting   p3d high " + str.tostring(high[1]))
+            atlState.prev_p3d_atl_price_high := high[1] // High of the bar immediately preceding the current bar
+            atlState.prev_p3d_atl_price_low := low[1]
             atlState.prev_p3d_atl_bar := bar_index - 1
             
             int lower_candles_count = 0
@@ -52,8 +160,9 @@ processNewAllTimeLow() =>
             bool prev_p3d_found = false
             for i = 2 to bar_index 
                 // Find the first high point going back from ATL
-                if (high[i] + priceCompareMargin * high[i]) > atlState.prev_p3d_atl_price and not prev_p3d_found
-                    atlState.prev_p3d_atl_price := high[i]
+                if (high[i] + priceCompareMargin * high[i]) > atlState.prev_p3d_atl_price_high and not prev_p3d_found
+                    atlState.prev_p3d_atl_price_high := high[i]
+                    atlState.prev_p3d_atl_price_low := low[i]
                     atlState.prev_p3d_atl_bar := bar_index - i
                     continue
                 else
@@ -62,28 +171,32 @@ processNewAllTimeLow() =>
                 // Step 2: From that prev_p3d, go backwards again
                 // Search for at least two candles that are lower than prev_p3d.
                 // Mark that spot as prev_p2d.
-                if high[i] < atlState.prev_p3d_atl_price
+                if low[i] < atlState.prev_p3d_atl_price_low
                     lower_candles_count := lower_candles_count + 1
                     if lower_candles_count >= 2 and na(prev_p2d_bar_index)
                         prev_p2d_bar_index := bar_index - i // Store the index of this bar
-                        atlState.prev_p2d_atl_price := low[i] // Store the high of this bar
+                        atlState.prev_p2d_atl_price_low := low[i]
+                        atlState.prev_p2d_atl_price_high := high[i]
                         atlState.prev_p2d_atl_bar := prev_p2d_bar_index
                 else
                     // Reset count if a candle is not lower than prev_p3d before finding two
                     if lower_candles_count < 2
-                        lower_candles_count := 0
+                        // lower_candles_count := 0
+                        log.info('Reset lower candles')
                     else
                         break // Stop searching for prev_p2d if condition is met or broken
 
             // Step 3: From prev_p2d, iterate backwards again. Look for next highest P3D
             if not na(prev_p2d_bar_index)
                 int j = (bar_index - prev_p2d_bar_index) + 1
-                atlState.prev_prev_p3d_atl_price := high[j]
+                atlState.prev_prev_p3d_atl_price_high := high[j]
+                atlState.prev_prev_p3d_atl_price_low := low[j]
                 atlState.prev_prev_p3d_atl_bar := bar_index - j
                 bool prev_prev_p3d_found = false
                 for i = j + 1 to bar_index
-                    if (high[i] + priceCompareMargin * high[i]) > atlState.prev_prev_p3d_atl_price and not prev_prev_p3d_found
-                        atlState.prev_prev_p3d_atl_price := high[i]
+                    if (high[i] + priceCompareMargin * high[i]) > atlState.prev_prev_p3d_atl_price_high and not prev_prev_p3d_found
+                        atlState.prev_prev_p3d_atl_price_high := high[i]
+                        atlState.prev_prev_p3d_atl_price_low := low[i]
                         atlState.prev_prev_p3d_atl_bar := bar_index - i
                         continue
                     else 
@@ -95,12 +208,87 @@ processNewAllTimeLow() =>
             label.delete(atlState.prev_p2d_label_index)
             label.delete(atlState.prev_prev_p3d_label_index)
 
-            atlState.prev_p3d_label_index := label.new(x = atlState.prev_p3d_atl_bar, y = atlState.prev_p3d_atl_price, text = 'Prev P3D', style = label.style_label_down, color = color.red, textcolor = color.white)
-            atlState.prev_p2d_label_index := label.new(x = atlState.prev_p2d_atl_bar, y = atlState.prev_p2d_atl_price, text = 'Prev P2D', style = label.style_label_up, color = color.yellow, textcolor = color.white)
-            atlState.prev_prev_p3d_label_index := label.new(x = atlState.prev_prev_p3d_atl_bar, y = atlState.prev_prev_p3d_atl_price, text = 'Prev P3D', style = label.style_label_down, color = color.green, textcolor = color.white)
+            atlState.prev_p3d_label_index := label.new(x = atlState.prev_p3d_atl_bar, y = atlState.prev_p3d_atl_price_high, text = 'Prev P3D', style = label.style_label_down, color = getPivotTypeColor(PivotPointType.P3D), textcolor = color.white)
+            atlState.prev_p2d_label_index := label.new(x = atlState.prev_p2d_atl_bar, y = atlState.prev_p2d_atl_price_low, text = 'Prev P2D', style = label.style_label_up, color = getPivotTypeColor(PivotPointType.P2D), textcolor = color.white)
+            atlState.prev_prev_p3d_label_index := label.new(x = atlState.prev_prev_p3d_atl_bar, y = atlState.prev_prev_p3d_atl_price_high, text = 'Prev P3D', style = label.style_label_down, color = getPivotTypeColor(PivotPointType.P3D), textcolor = color.white)
 
+        initStatesAfterAllTimeLow()
+
+
+
+processDownTrend() =>
+    printBarAndDate("[Down Trend] Process current bar at zone " + str.tostring(currentState.zone))
+    PivotPoint p2d = pivotHistory.get(-1)
+    if p2d.pivotType != PivotPointType.P2D
+        printBarAndDate("Expected P2D but found " + str.tostring(p2d.pivotType))
+    p3d = pivotHistory.get(-2)
+    if p3d.pivotType != PivotPointType.P3D
+        printBarAndDate("Expected P3D but found " + str.tostring(p3d.pivotType))
+
+    log.info(str.tostring(p3d.pivotHigh))
+    if high > p3d.pivotHigh
+        // Enter trendless zone
+        currentState.zone := TrendZone.TrendlessZone
+        log.info(str.tostring(high))
+        printBarAndDate("Transition from Down to Trendless")
+
+processUpTrend() =>
+    printBarAndDate("[Up Trend] Process current bar at zone " + str.tostring(currentState.zone))
+    lastPivot = pivotHistory.get(-1)
+    if lastPivot.pivotType == PivotPointType.P2H
+        if high > lastPivot.pivotHigh
+            // Replace old P2H with higher P2H
+            currentState.numCorrectionCandles := 0
+            createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
+
+processTrendless() =>
+    printBarAndDate("[Trendless] Process current bar at zone " + str.tostring(currentState.zone))
+
+    lastPivot = pivotHistory.get(-1)
+    if lastPivot.pivotType == PivotPointType.P2D
+        // First P3D after last P2D
+        createLabelAndHistoryAtCurrentBar(PivotPointType.P3D)
+
+    if lastPivot.pivotType == PivotPointType.P3D
+        if high > lastPivot.pivotHigh
+            // Replace old P3D with higher P3D
+            currentState.numCorrectionCandles := 0
+            createLabelAndHistoryAtCurrentBar(PivotPointType.P3D, true)
+        else
+            // We need correction candles
+            currentState.numCorrectionCandles += 1
+            if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
+                // We have found a P3H
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
+
+    if lastPivot.pivotType == PivotPointType.P3H
+        if low < lastPivot.pivotLow
+            // Replace old P3H with lower P3H
+            label.delete(lastPivot.pivotLabel)
+            pivotHistory.pop()
+            createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
+        PivotPoint lastTLU = pivotHistory.get(-2)
+        // TODO: Verify correct pivot type?
+        if high > lastTLU.pivotHigh
+            // Enter UP Zone
+            currentState.numCorrectionCandles := 0
+            currentState.zone := TrendZone.UpZone
+            // We have found a P2H
+            createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
+            printBarAndDate("Transition from trendless to UP")
+    
+
+processCurrentBar() =>
+    if currentState.zone == TrendZone.DownZone
+        processDownTrend()
+    else if currentState.zone == TrendZone.UpZone
+        processUpTrend()
+    else if currentState.zone == TrendZone.TrendlessZone
+        processTrendless()
+    else
+        printBarAndDate("Unknown Zone")
 
 
 if checkIfWithinRange()
-    // log.info("Processing bar " + str.tostring(bar_index) + " for Date " + str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone))
     processNewAllTimeLow()
+    processCurrentBar()
