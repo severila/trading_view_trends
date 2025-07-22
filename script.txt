@@ -1,15 +1,17 @@
 //@version=6
-indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500)
+indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500, max_lines_count = 500)
 
-startDate = input.time(timestamp('2022-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
+START_DATE = input.time(timestamp('2022-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
 NUM_CORRECTION_CANDLES = input.int(3, title = 'Minimum Correction Candles in Uptrend', minval = 1, group = 'Trend Parameters')
 NUM_CORRECTION_CANDLES_DOWN = input.int(2, title = 'Minimum Correction Candles in Downtrend', minval = 1, group = 'Trend Parameters')
-priceCompareMargin = input.float(0.02, title = 'Margin for price comparisons', minval = 0, maxval = 0.1, group = 'Trend Parameters')
+DRAW_LINE = input.bool(true, "Draw Line", "If the trend line should be shown")
+DRAW_LABELS = input.bool(true, "Draw Labels", "If the labels should be shown")
 
 // Visual Settings
-downZoneColor = input.color(defval = color.new(color.red, 80), title = 'Down Trend Background Color', group = "Trend Background Colors")
-upZoneColor = input.color(defval = color.new(color.green, 80), title = 'Up Trend Background Color', group = "Trend Background Colors")
-trendlessZoneColor = input.color(defval = color.new(color.blue, 80), title = 'Trendless Trend Background Color', group = "Trend Background Colors")
+lineColor = input.color(defval = color.new(color.fuchsia, 0), title = 'Line Color', group = "Colors")
+downZoneColor = input.color(defval = color.new(color.red, 80), title = 'Down Trend Background Color', group = "Colors")
+upZoneColor = input.color(defval = color.new(color.green, 80), title = 'Up Trend Background Color', group = "Colors")
+trendlessZoneColor = input.color(defval = color.new(color.blue, 80), title = 'Trendless Trend Background Color', group = "Colors")
 
 debugDateStart = timestamp('2024-07-19')
 debugDateEnd = timestamp('2024-07-25')
@@ -58,6 +60,7 @@ type PivotPoint
     label pivotLabel
 
 var array<PivotPoint> pivotHistory = array.new<PivotPoint>(0)
+var line[] pivotLines = array.new_line()
 
 type CurrentState
     TrendZone zone
@@ -80,14 +83,17 @@ printBarAndDate(string message = na) =>
         log.info("Current bar " + barInfo)
 
 getPivotTypeColor(PivotPointType pivotType) =>
-    switch pivotType
-        PivotPointType.ATL => color.purple
-        PivotPointType.P2D => color.red
-        PivotPointType.P3D => color.orange
-        PivotPointType.P2H => color.green
-        PivotPointType.P3H => color.navy
-        PivotPointType.TLD => color.black
-        PivotPointType.TLU => color.yellow
+    if DRAW_LABELS
+        switch pivotType
+            PivotPointType.ATL => color.purple
+            PivotPointType.P2D => color.red
+            PivotPointType.P3D => color.orange
+            PivotPointType.P2H => color.green
+            PivotPointType.P3H => color.navy
+            PivotPointType.TLD => color.black
+            PivotPointType.TLU => color.yellow
+    else
+        color.new(color.white, 100)
 
 getPivotTypeLabelStyle(PivotPointType pivotType) =>
     switch pivotType
@@ -125,7 +131,7 @@ replaceLastLabel(PivotPointType pivotType) =>
     pivotHistory.push(lastPivot)
 
 checkIfWithinRange() =>
-    time >= startDate
+    time >= START_DATE
 
 initStatesAfterAllTimeLow() =>
     // printBarAndDate("Init states after All Time Low")
@@ -162,6 +168,7 @@ initStatesAfterAllTimeLow() =>
 
 processNewAllTimeLow() =>
     if na(atlState.atl_price_low) or low < atlState.atl_price_low
+        float priceCompareMargin = 0.02
         atlState.atl_price_low := low
         atlState.atl_price_high := high
         atlState.atl_bar := bar_index
@@ -388,3 +395,38 @@ if checkIfWithinRange()
     processNewAllTimeLow()
     processCurrentBar()
 bgcolor(getTrendZoneColor())
+
+
+getPivotLineY(PivotPoint pivot) =>
+    switch pivot.pivotType
+        PivotPointType.ATL => pivot.pivotLow
+        PivotPointType.P2D => pivot.pivotLow
+        PivotPointType.P3D => pivot.pivotHigh
+        PivotPointType.TLD => pivot.pivotLow
+        PivotPointType.P2H => pivot.pivotHigh
+        PivotPointType.P3H => pivot.pivotLow
+        PivotPointType.TLU => pivot.pivotHigh
+
+drawPivotLines(array<PivotPoint> pivots) =>
+    // Delete all lines drawn on the previous bar
+    for l in pivotLines
+        line.delete(l)
+    array.clear(pivotLines)
+
+    // Draw new lines if there are at least two points in the history
+    if array.size(pivots) > 1
+        for i = 0 to array.size(pivots) - 2
+            PivotPoint startPoint = array.get(pivots, i)
+            PivotPoint endPoint = array.get(pivots, i + 1)
+
+            float y1 = getPivotLineY(startPoint)
+            float y2 = getPivotLineY(endPoint)
+
+            // Create a new line between the two points
+            newLine = line.new(x1=startPoint.barIndex, y1=y1, x2=endPoint.barIndex, y2=y2, color=lineColor, width=2)
+            
+            // Store the new line in our array for future cleanup
+            array.push(pivotLines, newLine)
+
+if DRAW_LINE
+    drawPivotLines(pivotHistory)
