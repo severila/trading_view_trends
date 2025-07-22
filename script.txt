@@ -3,9 +3,18 @@ indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500)
 
 startDate = input.time(timestamp('2022-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
 NUM_CORRECTION_CANDLES = input.int(3, title = 'Minimum Correction Candles in Uptrend', minval = 1, group = 'Trend Parameters')
-NUM_CORRECTION_CANDLES_DOWN = input.int(2, title = 'Minimum Correction Candles in Downtrend', minval = 1, group = 'Trend Parameters')    
+NUM_CORRECTION_CANDLES_DOWN = input.int(2, title = 'Minimum Correction Candles in Downtrend', minval = 1, group = 'Trend Parameters')
+priceCompareMargin = input.float(0.02, title = 'Margin for price comparisons', minval = 0, maxval = 0.1, group = 'Trend Parameters')
 
-var float priceCompareMargin = 0.02
+// Visual Settings
+downZoneColor = input.color(defval = color.new(color.red, 80), title = 'Down Trend Background Color', group = "Trend Background Colors")
+upZoneColor = input.color(defval = color.new(color.green, 80), title = 'Up Trend Background Color', group = "Trend Background Colors")
+trendlessZoneColor = input.color(defval = color.new(color.blue, 80), title = 'Trendless Trend Background Color', group = "Trend Background Colors")
+
+debugDateStart = timestamp('2024-07-19')
+debugDateEnd = timestamp('2024-07-25')
+doDebug = false
+
 
 type AllTimeLowState
     int atl_bar
@@ -56,6 +65,12 @@ type CurrentState
     int numCorrectionCandles = 0
 
 var currentState = CurrentState.new(zone=TrendZone.TrendlessZone, pivotPoint = na)
+
+if doDebug and time >= debugDateStart and time <= debugDateEnd
+    log.info("High " + str.tostring(high) + " , Low " + str.tostring(low))
+    // log.info("CurrentState: " + str.tostring(currentState.zone))
+    lastPivot = pivotHistory.get(-1)
+    log.info("Last Pivot: " + str.tostring(lastPivot.pivotType) + " " + str.tostring(lastPivot.pivotHigh) + " , " + str.tostring(lastPivot.pivotLow))
 
 printBarAndDate(string message = na) =>
     string barInfo = "[Bar: " + str.tostring(bar_index) + "][Time: " + str.format_time(time, "yyyy-MM-dd", syminfo.timezone) + "]"
@@ -113,7 +128,7 @@ checkIfWithinRange() =>
     time >= startDate
 
 initStatesAfterAllTimeLow() =>
-    printBarAndDate("Init states after All Time Low")
+    // printBarAndDate("Init states after All Time Low")
     currentState.zone := TrendZone.DownZone
     // Clear all labels
     for i = 0 to (array.size(pivotHistory) == 0 ? na : array.size(pivotHistory) - 1)
@@ -168,6 +183,9 @@ processNewAllTimeLow() =>
             int prev_p2d_bar_index = na
             bool prev_p3d_found = false
             for i = 2 to bar_index 
+                if i > 4999
+                    // TODO
+                    break
                 // Find the first high point going back from ATL
                 if (high[i] + priceCompareMargin * high[i]) > atlState.prev_p3d_atl_price_high and not prev_p3d_found
                     atlState.prev_p3d_atl_price_high := high[i]
@@ -228,11 +246,11 @@ processNewAllTimeLow() =>
 processDownTrend() =>
     lastPivot = pivotHistory.get(-1)
     if lastPivot.pivotType == PivotPointType.P2D
-        printBarAndDate("[Down Trend] Process current bar at zone " + str.tostring(currentState.zone))
+        // printBarAndDate("[Down Trend] Process current bar at zone " + str.tostring(currentState.zone))
         if low < lastPivot.pivotLow
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2D, true)
             
-        else if high > lastPivot.pivotHigh
+        else if low > lastPivot.pivotLow
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES_DOWN
                 currentState.numCorrectionCandles := 0
@@ -295,9 +313,7 @@ processUpTrend() =>
                 printBarAndDate("WRONG TYPE, NOT P3H")
             
             if high > previousP2H.pivotHigh
-                currentState.numCorrectionCandles += 1
-                if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
-                    createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
 
 processTrendless() =>
     //printBarAndDate("[Trendless] Process current bar at zone " + str.tostring(currentState.zone))
@@ -309,14 +325,11 @@ processTrendless() =>
     if lastPivot.pivotType == PivotPointType.TLU
         if high > lastPivot.pivotHigh
             // Replace old TLU with higher TLU
-            currentState.numCorrectionCandles := 0
             createLabelAndHistoryAtCurrentBar(PivotPointType.TLU, true)
         else
             // We need correction candles
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
-                // We have found a P3H
-                currentState.numCorrectionCandles := 0
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
 
     if lastPivot.pivotType == PivotPointType.P3H
@@ -326,40 +339,28 @@ processTrendless() =>
         PivotPoint lastTLU = pivotHistory.get(-2)
         // TODO: Verify correct pivot type?
         if high > lastTLU.pivotHigh
-            // Enter UP Zone
-            currentState.numCorrectionCandles := 0
             currentState.zone := TrendZone.UpZone
-            // We have found a P2H
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
-            printBarAndDate("Transition from trendless to UP")
 
     if lastPivot.pivotType == PivotPointType.TLD
         if low < lastPivot.pivotLow
-            currentState.numCorrectionCandles := 0
             createLabelAndHistoryAtCurrentBar(PivotPointType.TLD, true)
         else
-            currentState.numCorrectionCandles += 1
-            if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
-                currentState.numCorrectionCandles := 0
-                // TODO: Probably need to differentiate if the previous zone was UP or Down and chose P2H or P3D
-                createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
+            // TODO: Probably need to differentiate if the previous zone was UP or Down and chose P2H or P3D    
+            createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
 
     if lastPivot.pivotType == PivotPointType.P2H
         if high > lastPivot.pivotHigh
-            currentState.numCorrectionCandles := 0
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
         else if low < lastPivot.pivotLow
-            currentState.numCorrectionCandles += 1
-            if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
-                currentState.numCorrectionCandles := 0
-                if low < pivotHistory.get(-2).pivotLow
-                    currentState.zone := TrendZone.DownZone
-                    // The last P2H was actually a P3D. Keep old position
-                    replaceLastLabel(PivotPointType.P3D)
-                    // Now add current position as P2D
-                    createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
-                else
-                    createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
+            if low < pivotHistory.get(-2).pivotLow
+                currentState.zone := TrendZone.DownZone
+                // The last P2H was actually a P3D. Keep old position
+                replaceLastLabel(PivotPointType.P3D)
+                // Now add current position as P2D
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
+            else
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
 
     
 
@@ -376,11 +377,11 @@ processCurrentBar() =>
 getTrendZoneColor() =>
     color zoneColor = na
     if currentState.zone == TrendZone.DownZone
-        zoneColor := color.new(color.red, 90) // Light red for DownZone
+        zoneColor := downZoneColor
     else if currentState.zone == TrendZone.UpZone
-        zoneColor := color.new(color.green, 90) // Light green for UpZone
+        zoneColor := upZoneColor
     else if currentState.zone == TrendZone.TrendlessZone
-        zoneColor := color.new(color.gray, 90) // Light gray for TrendlessZone
+        zoneColor := trendlessZoneColor
     zoneColor
 
 if checkIfWithinRange()
