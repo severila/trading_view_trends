@@ -337,7 +337,13 @@ processTrendless() =>
             // We need correction candles
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles > NUM_CORRECTION_CANDLES
-                createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
+                PivotPoint previousHighPivot = pivotHistory.get(-3)
+                if previousHighPivot.pivotType == PivotPointType.P3D and low < previousHighPivot.pivotLow
+                    // We were in Down Zone previously and go back to it
+                    createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
+                    currentState.zone := TrendZone.DownZone
+                else
+                    createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
 
     if lastPivot.pivotType == PivotPointType.P3H
         if low < lastPivot.pivotLow
@@ -353,7 +359,8 @@ processTrendless() =>
         if low < lastPivot.pivotLow
             createLabelAndHistoryAtCurrentBar(PivotPointType.TLD, true)
         else
-            // TODO: Probably need to differentiate if the previous zone was UP or Down and chose P2H or P3D    
+            // TODO: Probably need to differentiate if the previous zone was UP or Down and chose P2H or P3D
+            // TODO: If previous was UP -> need to be higher than previous P2H
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
 
     if lastPivot.pivotType == PivotPointType.P2H
