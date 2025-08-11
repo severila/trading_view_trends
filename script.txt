@@ -1,5 +1,6 @@
 //@version=6
 indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500, max_lines_count = 500)
+import TradingView/ta/10
 
 // TODO: Split trendless in two phases: coming from Up or coming from Down
 
@@ -19,6 +20,9 @@ debugDateStart = timestamp('2024-07-19')
 debugDateEnd = timestamp('2024-07-25')
 doDebug = false
 
+float lowestValue = ta.lowest(low, NUM_CORRECTION_CANDLES)
+int lowestValueOffset = ta.lowestbars(low, NUM_CORRECTION_CANDLES)
+// plot(lowestValue, title="Debug Lowest Value", color=color.new(color.orange, 0), linewidth=2)
 
 type AllTimeLowState
     int atl_bar
@@ -107,13 +111,13 @@ getPivotTypeLabelStyle(PivotPointType pivotType) =>
         PivotPointType.TLD => label.style_label_up
         PivotPointType.TLU => label.style_label_down
     
-getPivotTypeLabelY(PivotPointType pivotType) =>
+getPivotTypeLabelY(PivotPointType pivotType, int index_offset = 0) =>
     switch pivotType
         PivotPointType.ATL => low
         PivotPointType.P2D => low
         PivotPointType.P3D => high
         PivotPointType.P2H => high
-        PivotPointType.P3H => low
+        PivotPointType.P3H => low[index_offset]
         PivotPointType.TLD => low
         PivotPointType.TLU => high
 
@@ -122,8 +126,8 @@ createLabelAndHistoryAtCurrentBar(PivotPointType pivotType, bool replaceLast = f
     if replaceLast
         label.delete(pivotHistory.get(-1).pivotLabel)
         pivotHistory.pop()
-    label labelIndex = label.new(x = bar_index - index_offset, y = getPivotTypeLabelY(pivotType), text = str.tostring(pivotType), style = getPivotTypeLabelStyle(pivotType), color = getPivotTypeColor(pivotType), textcolor = color.white, size=10)
-    pivotHistory.push(PivotPoint.new(barIndex = bar_index - index_offset, pivotHigh = high, pivotLow = low, pivotType = pivotType, pivotLabel = labelIndex))
+    label labelIndex = label.new(x = bar_index - index_offset, y = getPivotTypeLabelY(pivotType, index_offset), text = str.tostring(pivotType), style = getPivotTypeLabelStyle(pivotType), color = getPivotTypeColor(pivotType), textcolor = color.white, size=10)
+    pivotHistory.push(PivotPoint.new(barIndex = bar_index - index_offset, pivotHigh = high[index_offset], pivotLow = low[index_offset], pivotType = pivotType, pivotLabel = labelIndex))
 
 replaceLastLabel(PivotPointType pivotType, int index = 0) =>
     int arraySize = array.size(pivotHistory)
@@ -314,17 +318,16 @@ processUpTrend() =>
         if high > lastPivot.pivotHigh
             // Replace old P2H with higher P2H
             currentState.numCorrectionCandles := 0
-            createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
+            createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, replaceLast = true)
         else
             if low < previousP3H.pivotLow
                 currentState.zone := TrendZone.TrendlessZone
                 createLabelAndHistoryAtCurrentBar(PivotPointType.TLD)
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES
-                // TODO: Dont put it at this position, put the at the lowest point (use the low) of the NUM candles. 
-                offset = ta.lowestbars(low, NUM_CORRECTION_CANDLES + 1)
-                printBarAndDate("Offset: " + str.tostring(offset))
-                createLabelAndHistoryAtCurrentBar(PivotPointType.P3H, false, 0)
+                // printBarAndDate("Offset: " + str.tostring(lowestValueOffset) + " value: " + str.tostring(lowestValue))
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P3H, false, -lowestValueOffset)
+                
     
     if lastPivot.pivotType == PivotPointType.P3H
         if low < lastPivot.pivotLow
@@ -382,12 +385,13 @@ processTrendless() =>
                     createLabelAndHistoryAtCurrentBar(PivotPointType.P2D, true)
                     if lastHighPivot.pivotType == PivotPointType.P2H
                         // It was actually a P3D
+                        printBarAndDate("WE HEREEEEEEE")
                         replaceLastLabel(PivotPointType.P3D, 1)
                     currentState.zone := TrendZone.DownZone
             else
                 // Replace old P3H with lower P3H
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P3H, true)
-        // TODO: Verify correct pivot type?
+
         if high > lastHighPivot.pivotHigh
             currentState.zone := TrendZone.UpZone
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
@@ -408,7 +412,11 @@ processTrendless() =>
 
     if lastPivot.pivotType == PivotPointType.P2H
         if high > lastPivot.pivotHigh
-            // TODO: if higher than previous P2H -> immedetialy go to UP Zone
+            PivotPoint previousHighPivot = pivotHistory.get(-3)
+            // If previous zone was Up Zone -> need to be higher than previous P2H
+            if previousHighPivot.pivotType == PivotPointType.P2H
+                if high > previousHighPivot.pivotHigh
+                    currentState.zone := TrendZone.UpZone
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
         else if low < lastPivot.pivotLow
             PivotPoint lastLowPivot = pivotHistory.get(-2)
@@ -421,7 +429,6 @@ processTrendless() =>
             else
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
 
-    
 
 processCurrentBar() =>
     if currentState.zone == TrendZone.DownZone
