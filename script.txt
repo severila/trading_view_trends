@@ -81,7 +81,9 @@ if doDebug and time >= debugDateStart and time <= debugDateEnd
     lastPivot = pivotHistory.get(-1)
     log.info("Last Pivot: " + str.tostring(lastPivot.pivotType) + " " + str.tostring(lastPivot.pivotHigh) + " , " + str.tostring(lastPivot.pivotLow))
 
-printBarAndDate(string message = na) =>
+printBarAndDate(string message = na, int year_filter = na) =>
+    if not na(year_filter) and year(timenow) != year
+        na
     string barInfo = "[Bar: " + str.tostring(bar_index) + "][Time: " + str.format_time(time, "yyyy-MM-dd", syminfo.timezone) + "]"
     if not na(message)
         log.info(message + barInfo)
@@ -277,14 +279,18 @@ processNewAllTimeLow() =>
 
 processDownTrend() =>
     PivotPoint lastPivot = pivotHistory.get(-1)
-    PivotPoint lastHighPivot = pivotHistory.get(-2)
     if lastPivot.pivotType == PivotPointType.P2D
+        PivotPoint lastHighPivot = pivotHistory.get(-2)
         // printBarAndDate("[Down Trend] Process current bar at zone " + str.tostring(currentState.zone))
         if low < lastPivot.pivotLow
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2D, true)
         else if high > lastHighPivot.pivotHigh
             currentState.zone := TrendZone.TrendlessZone
-            createLabelAndHistoryAtCurrentBar(PivotPointType.TLU)
+            if lastHighPivot.pivotType == PivotPointType.TLU
+                // Not allowed to have 2 TLU in a row as high points. Change according to v7 feedback
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
+            else
+                createLabelAndHistoryAtCurrentBar(PivotPointType.TLU)
         else
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES_DOWN
@@ -292,10 +298,14 @@ processDownTrend() =>
 
     if lastPivot.pivotType == PivotPointType.P3D
         if high > lastPivot.pivotHigh
-            PivotPoint lastP3D = pivotHistory.get(-3)
-            if high > lastP3D.pivotHigh
+            PivotPoint lastHighPivot = pivotHistory.get(-3)
+            if high > lastHighPivot.pivotHigh
                 currentState.zone := TrendZone.TrendlessZone
-                createLabelAndHistoryAtCurrentBar(PivotPointType.TLU, true)
+                if lastHighPivot.pivotType == PivotPointType.TLU
+                    // Not allowed to have 2 TLU in a row as high points. Change according to v7 feedback
+                    createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
+                else
+                    createLabelAndHistoryAtCurrentBar(PivotPointType.TLU, true)
             else
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P3D, true)
         else if low < lastPivot.pivotLow
@@ -320,7 +330,10 @@ processUpTrend() =>
                 currentState.zone := TrendZone.TrendlessZone
                 createLabelAndHistoryAtCurrentBar(PivotPointType.TLD)
             else
-                currentState.numCorrectionCandles += 1
+                if low < lastPivot.pivotLow
+                    currentState.numCorrectionCandles += 1
+                else
+                    currentState.numCorrectionCandles := 0
             if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES
                 // printBarAndDate("Offset: " + str.tostring(lowestValueOffset) + " value: " + str.tostring(lowestValue))
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P3H, false, -lowestValueOffset)
@@ -414,6 +427,7 @@ processTrendless() =>
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
         else if low < lastPivot.pivotLow
             PivotPoint lastLowPivot = pivotHistory.get(-2)
+            currentState.numCorrectionCandles += 1
             if low < lastLowPivot.pivotLow
                 currentState.zone := TrendZone.DownZone
                 // The last P2H was actually a P3D. Keep old position
@@ -421,7 +435,12 @@ processTrendless() =>
                 // Now add current position as P2D
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
             else
-                createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
+                // Change according to v7 script feedback
+                if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES
+                    createLabelAndHistoryAtCurrentBar(PivotPointType.P3H)
+        else
+            currentState.numCorrectionCandles := 0
+            na
 
 
 processCurrentBar() =>
