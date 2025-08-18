@@ -4,7 +4,8 @@ import TradingView/ta/10
 
 // TODO: Split trendless in two phases: coming from Up or coming from Down
 
-START_DATE = input.time(timestamp('2022-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
+START_DATE = input.time(timestamp('2021-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
+ATL_BACK_SEARCH = input.int(100, title="How far back we look for p3d from ATL")
 NUM_CORRECTION_CANDLES = input.int(3, title = 'Minimum Correction Candles in Uptrend', minval = 1, group = 'Trend Parameters')
 NUM_CORRECTION_CANDLES_DOWN = input.int(2, title = 'Minimum Correction Candles in Downtrend', minval = 1, group = 'Trend Parameters')
 DRAW_LINE = input.bool(true, "Draw Line", "If the trend line should be shown")
@@ -210,7 +211,7 @@ processNewAllTimeLow() =>
             int prev_p2d_bar_index = na
             bool prev_p3d_found = false
             for i = 2 to bar_index 
-                if i > 4900
+                if i > ATL_BACK_SEARCH
                     atlState.prev_p3d_atl_price_high := high[i]
                     atlState.prev_p3d_atl_price_low := low[i]
                     atlState.prev_p3d_atl_bar := bar_index - i
@@ -250,7 +251,7 @@ processNewAllTimeLow() =>
                 atlState.prev_prev_p3d_atl_bar := bar_index - j
                 bool prev_prev_p3d_found = false
                 for i = j + 1 to bar_index
-                    if i > 4950
+                    if i > ATL_BACK_SEARCH
                         atlState.prev_prev_p3d_atl_price_high := high[i]
                         atlState.prev_prev_p3d_atl_price_low := low[i]
                         atlState.prev_prev_p3d_atl_bar := bar_index - i
