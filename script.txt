@@ -1,10 +1,12 @@
 //@version=6
+// TODO: -> Indikator (Trendphase) für Alarme verwenden
+// TODO: Split trendless in two phases: coming from Up or coming from Down
+
 indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500, max_lines_count = 500)
 import TradingView/ta/10
 
-// TODO: Split trendless in two phases: coming from Up or coming from Down
 
-START_DATE = input.time(timestamp('2021-12-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
+START_DATE = input.time(timestamp('2024-06-01'), title = 'Start Date', tooltip = 'Analysis will begin from this date (only if Date option selected)', group = 'Analysis Range')
 ATL_BACK_SEARCH = input.int(100, title="How far back we look for p3d from ATL")
 NUM_CORRECTION_CANDLES = input.int(3, title = 'Minimum Correction Candles in Uptrend', minval = 1, group = 'Trend Parameters')
 NUM_CORRECTION_CANDLES_DOWN = input.int(2, title = 'Minimum Correction Candles in Downtrend', minval = 1, group = 'Trend Parameters')
@@ -21,6 +23,7 @@ debugDateStart = timestamp('2024-07-19')
 debugDateEnd = timestamp('2024-07-25')
 doDebug = false
 
+// Used to calculate offset for correct placement of lowest value (e.g. P3H)
 float lowestValue = ta.lowest(low, NUM_CORRECTION_CANDLES)
 int lowestValueOffset = ta.lowestbars(low, NUM_CORRECTION_CANDLES)
 // plot(lowestValue, title="Debug Lowest Value", color=color.new(color.orange, 0), linewidth=2)
@@ -74,7 +77,16 @@ type CurrentState
     PivotPoint pivotPoint
     int numCorrectionCandles = 0
 
+// This stays consistent between bars
+var TrendZone previousZone = na
 var currentState = CurrentState.new(zone=TrendZone.TrendlessZone, pivotPoint = na)
+
+previousZone := currentState.zone
+// This inits every bar
+bool enterUpZone = false
+bool exitUpZone = false
+bool enterDownZone = false
+bool exitDownZone = false
 
 if doDebug and time >= debugDateStart and time <= debugDateEnd
     log.info("High " + str.tostring(high) + " , Low " + str.tostring(low))
@@ -319,7 +331,6 @@ processDownTrend() =>
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
 
 processUpTrend() =>
-    // printBarAndDate("[Up Trend] Process current bar at zone " + str.tostring(currentState.zone))
     lastPivot = pivotHistory.get(-1)
     if lastPivot.pivotType == PivotPointType.P2H
         PivotPoint previousP3H = pivotHistory.get(-2)
@@ -331,7 +342,7 @@ processUpTrend() =>
                 currentState.zone := TrendZone.TrendlessZone
                 createLabelAndHistoryAtCurrentBar(PivotPointType.TLD)
             else
-                if low < lastPivot.pivotLow
+                if high < lastPivot.pivotHigh
                     currentState.numCorrectionCandles += 1
                 else
                     currentState.numCorrectionCandles := 0
@@ -375,9 +386,12 @@ processTrendless() =>
             // We need correction candles
             currentState.numCorrectionCandles += 1
             PivotPoint previousHighPivot = pivotHistory.get(-3)
-            if previousHighPivot.pivotType == PivotPointType.P3D and low < previousHighPivot.pivotLow
+            PivotPoint previousLowPivot = pivotHistory.get(-2)
+            if previousHighPivot.pivotType == PivotPointType.P3D and low < previousHighPivot.pivotLow and low < previousLowPivot.pivotLow
                 // We were in Down Zone previously and go back to it
-                createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
+                // TODO: Fix lowestValueOffset (Gold, 10. Juli 2023 )
+                printBarAndDate("Lowestt offset" + str.tostring(lowestValueOffset))
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P2D, false, -lowestValueOffset)
                 currentState.zone := TrendZone.DownZone
             else
                 if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES
@@ -426,6 +440,7 @@ processTrendless() =>
                 if high > previousHighPivot.pivotHigh
                     currentState.zone := TrendZone.UpZone
             createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
+        // TODO: Is this correct or should it be high < lastPivot.pivotHigh ?
         else if low < lastPivot.pivotLow
             PivotPoint lastLowPivot = pivotHistory.get(-2)
             currentState.numCorrectionCandles += 1
@@ -503,3 +518,13 @@ drawPivotLines(array<PivotPoint> pivots) =>
 
 if DRAW_LINE
     drawPivotLines(pivotHistory)
+
+bool zoneChanged = false
+if previousZone != currentState.zone
+    zoneChanged := true
+    log.info("State changed from " + str.tostring(previousZone) + " to " + str.tostring(currentState.zone))
+
+alertcondition(previousZone == TrendZone.DownZone, title="Exit Down", message="Entering Trendless Zone from Down Zone")
+alertcondition(previousZone == TrendZone.UpZone, title="Exit Up", message="Entering Trendless Zone from Up Zone")
+alertcondition(previousZone == TrendZone.TrendlessZone and currentState.zone == TrendZone.DownZone, title="Enter Down", message="Entering Down Zone")
+alertcondition(previousZone == TrendZone.TrendlessZone and currentState.zone == TrendZone.UpZone, title="Enter Up", message="Entering Up Zone")
