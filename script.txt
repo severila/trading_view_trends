@@ -23,10 +23,13 @@ debugDateStart = timestamp('2024-07-19')
 debugDateEnd = timestamp('2024-07-25')
 doDebug = false
 
-// Used to calculate offset for correct placement of lowest value (e.g. P3H)
-float lowestValue = ta.lowest(low, NUM_CORRECTION_CANDLES)
+// Used to calculate offset for correct placement of lowest/highest value (e.g. P3H)
 int lowestValueOffset = ta.lowestbars(low, NUM_CORRECTION_CANDLES)
+// float lowestValue = ta.lowest(low, NUM_CORRECTION_CANDLES)
 // plot(lowestValue, title="Debug Lowest Value", color=color.new(color.orange, 0), linewidth=2)
+int highestValueOffset = ta.highestbars(high, NUM_CORRECTION_CANDLES_DOWN)
+// float highestValue = ta.highest(high, NUM_CORRECTION_CANDLES_DOWN)
+// plot(highestValue, title="Debug Highest Value", color=color.new(color.orange, 0), linewidth=2)
 
 type AllTimeLowState
     int atl_bar
@@ -307,7 +310,7 @@ processDownTrend() =>
         else
             currentState.numCorrectionCandles += 1
             if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES_DOWN
-                createLabelAndHistoryAtCurrentBar(PivotPointType.P3D)
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P3D, false, -highestValueOffset)
 
     if lastPivot.pivotType == PivotPointType.P3D
         if high > lastPivot.pivotHigh
@@ -347,7 +350,6 @@ processUpTrend() =>
                 else
                     currentState.numCorrectionCandles := 0
             if currentState.numCorrectionCandles >= NUM_CORRECTION_CANDLES
-                // printBarAndDate("Offset: " + str.tostring(lowestValueOffset) + " value: " + str.tostring(lowestValue))
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P3H, false, -lowestValueOffset)
                 
     
