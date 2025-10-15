@@ -2,7 +2,7 @@
 // TODO: -> Indikator (Trendphase) für Alarme verwenden
 // TODO: Split trendless in two phases: coming from Up or coming from Down
 
-indicator("Mein Skript", overlay = true, precision = 0, max_labels_count = 500, max_lines_count = 500)
+indicator("Mein Skript v11", overlay = true, precision = 0, max_labels_count = 500, max_lines_count = 500)
 import TradingView/ta/10
 
 
@@ -79,17 +79,18 @@ type CurrentState
     TrendZone zone
     PivotPoint pivotPoint
     int numCorrectionCandles = 0
+    bool continueUpTrend = false
+    bool continueDownTrend = false
 
 // This stays consistent between bars
 var TrendZone previousZone = na
 var currentState = CurrentState.new(zone=TrendZone.TrendlessZone, pivotPoint = na)
+currentState.continueDownTrend := false
+currentState.continueUpTrend := false
 
 previousZone := currentState.zone
-// This inits every bar
-bool enterUpZone = false
-bool exitUpZone = false
-bool enterDownZone = false
-bool exitDownZone = false
+
+
 
 if doDebug and time >= debugDateStart and time <= debugDateEnd
     log.info("High " + str.tostring(high) + " , Low " + str.tostring(low))
@@ -327,10 +328,8 @@ processDownTrend() =>
         else if low < lastPivot.pivotLow
             // We also want to be lower than the last P2D
             PivotPoint previousP2D = pivotHistory.get(-2)
-            if previousP2D.pivotType != PivotPointType.P2D
-                printBarAndDate("WRONG TYPE, NOT P3D")
-            
             if low < previousP2D.pivotLow
+                currentState.continueDownTrend := true
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P2D)
 
 processUpTrend() =>
@@ -367,10 +366,8 @@ processUpTrend() =>
         else if high > lastPivot.pivotHigh
             // We also want to be higher than the last P2H
             PivotPoint previousP2H = pivotHistory.get(-2)
-            if previousP2H.pivotType != PivotPointType.P2H
-                printBarAndDate("WRONG TYPE, NOT P3H")
-            
             if high > previousP2H.pivotHigh
+                currentState.continueUpTrend := true
                 createLabelAndHistoryAtCurrentBar(PivotPointType.P2H)
 
 processTrendless() =>
@@ -382,8 +379,17 @@ processTrendless() =>
 
     if lastPivot.pivotType == PivotPointType.TLU
         if high > lastPivot.pivotHigh
-            // Replace old TLU with higher TLU
-            createLabelAndHistoryAtCurrentBar(PivotPointType.TLU, true)
+            PivotPoint prePreviousHighPivot = pivotHistory.get(-5)
+            PivotPoint previousHighPivot = pivotHistory.get(-3)
+            if prePreviousHighPivot.pivotType == PivotPointType.P2H and high > prePreviousHighPivot.pivotHigh
+                currentState.zone := TrendZone.UpZone
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
+            else if previousHighPivot.pivotType == PivotPointType.P2H and high > previousHighPivot.pivotHigh
+                currentState.zone := TrendZone.UpZone
+                createLabelAndHistoryAtCurrentBar(PivotPointType.P2H, true)
+            else
+                // Replace old TLU with higher TLU
+                createLabelAndHistoryAtCurrentBar(PivotPointType.TLU, true)
         else
             // We need correction candles
             currentState.numCorrectionCandles += 1
@@ -528,3 +534,9 @@ alertcondition(previousZone == TrendZone.DownZone, title="Exit Down", message="E
 alertcondition(previousZone == TrendZone.UpZone, title="Exit Up", message="Entering Trendless Zone from Up Zone")
 alertcondition(previousZone == TrendZone.TrendlessZone and currentState.zone == TrendZone.DownZone, title="Enter Down", message="Entering Down Zone")
 alertcondition(previousZone == TrendZone.TrendlessZone and currentState.zone == TrendZone.UpZone, title="Enter Up", message="Entering Up Zone")
+if currentState.continueUpTrend
+    printBarAndDate("CONTINUE UP")
+if currentState.continueDownTrend
+    printBarAndDate("CONTINUE Down")
+alertcondition(currentState.continueUpTrend, title="Continue UP", message="Passed last P2H to new high")
+alertcondition(currentState.continueDownTrend, title="Continue Down", message="Passed last P3D to new low")
